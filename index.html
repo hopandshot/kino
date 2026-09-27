@@ -256,6 +256,20 @@ img{max-width:100%}
 
   <div class="notice" id="notice" hidden></div>
 
+  <!-- login -->
+  <section class="setup" id="login" hidden>
+    <form class="setform" id="loginForm" style="max-width:360px">
+      <p class="lead">Введите пароль. На этом устройстве он запомнится, больше спрашивать не будем.</p>
+      <input type="password" id="pw" autocomplete="current-password" placeholder="Пароль" aria-label="Пароль">
+      <div><button class="btn" id="loginBtn" type="submit">Войти</button></div>
+      <p class="err" id="loginErr" hidden></p>
+    </form>
+    <div id="migrateBox" class="notice" hidden style="max-width:460px">
+      <p style="margin:0 0 10px">Списка с таким паролем пока нет. Если вы впервые задаёте пароль, текущий список перенесётся под него, и без пароля его больше никто не откроет. Пароль должен быть от 6 символов, запомните его.</p>
+      <button class="btn small" id="migrateBtn" type="button">Защитить список этим паролем</button>
+    </div>
+  </section>
+
   <!-- setup -->
   <section class="setup" id="setup" hidden>
     <p class="lead">Разовая настройка, минут на 15. Всё бесплатно. Делает один из вас, второй потом просто открывает ссылку.</p>
@@ -354,7 +368,7 @@ service cloud.firestore {
 <div class="toast" id="toast" hidden></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { initializeFirestore, getFirestore, persistentLocalCache, doc, collection, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initializeFirestore, getFirestore, persistentLocalCache, doc, collection, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -366,6 +380,8 @@ const IMG = (p, size = "w342") => p ? `https://image.tmdb.org/t/p/${size}${p}` :
 const num = v => { if (v === null || v === undefined || v === "" || v === "N/A") return null; const n = parseFloat(String(v).replace(",", ".")); return isFinite(n) ? n : null; };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+const BUILTIN = {"c": {"apiKey": "AIzaSyDaltvSFVhSBC72aS_19rDrqE2-At1oKgk", "authDomain": "kinoivl.firebaseapp.com", "projectId": "kinoivl", "storageBucket": "kinoivl.firebasestorage.app", "messagingSenderId": "172151610776", "appId": "1:172151610776:web:cbb29ca7de06feeb879fed"}, "r": null};
+const LEGACY_ROOM = "8fbyzer9qt5pxs6gpnin2yih";
 const S = {
   db: null, roomRef: null, conn: null,
   movies: new Map(), people: { a: "Иван", b: "Влада" }, keys: {}, region: "ES",
@@ -642,14 +658,18 @@ function renderDrawer() {
     </div><div><button class="btn small" type="submit">Сохранить</button></div></form>` : ""}
     <div class="sect">${S.confirmDel ? `<div class="confirm">Удалить «${esc(m.title)}»? <button class="btn small" data-d="delyes">Удалить</button><button class="btn small ghost" data-d="delno">Отмена</button></div>` : `<div><button class="linkish danger" data-d="del">Удалить из списка</button></div>`}</div>`;
 }
-function inviteLink() { return location.origin + location.pathname + "#" + b64e(S.conn); }
+function inviteLink() { return location.origin + location.pathname; }
 function renderSettings() {
   const k = S.keys;
   $("#drawer").innerHTML = `
     <div class="dhead"><h2 style="font:400 22px var(--display)">Настройки</h2><button class="iconbtn" data-d="close" aria-label="Закрыть">${ICON.x}</button></div>
     <div class="sect"><h4>Пригласить</h4>
-      <p class="desc" style="font-size:14px">Отправьте эту ссылку второму человеку. Она открывает ваш общий список на любом устройстве, без регистрации. Не публикуйте её: кто знает ссылку, может менять список.</p>
+      <p class="desc" style="font-size:14px">Отправьте ссылку и пароль. Пароль вводится один раз, дальше устройство его помнит.</p>
       <div><button class="btn" data-d="invite">Скопировать ссылку</button></div></div>
+    <form class="sect setform" id="pwForm"><h4>Сменить пароль</h4>
+      <input type="password" name="pw" placeholder="Новый пароль, от 6 символов" autocomplete="new-password" minlength="6">
+      <div><button class="btn small ghost" type="submit">Сменить</button></div>
+      <span class="hint">На других устройствах нужно будет войти с новым паролем.</span></form>
     <form class="sect setform" id="setForm"><h4>Имена и регион</h4>
       <div class="row2"><input name="a" value="${esc(S.people.a)}" maxlength="20" aria-label="Первое имя"><input name="b" value="${esc(S.people.b)}" maxlength="20" aria-label="Второе имя"></div>
       <label class="field">Страна для «где посмотреть» (код: ES, PL, US…)<input name="region" value="${esc(S.region)}" maxlength="2"></label>
@@ -658,7 +678,7 @@ function renderSettings() {
       <label class="field">OMDb<input name="omdb" value="${esc(k.omdb || "")}" autocomplete="off"></label>
       <label class="field">Кинопоиск (kinopoisk.dev, необязательно)<input name="kp" value="${esc(k.kp || "")}" autocomplete="off"></label>
       <div><button class="btn small" type="submit">Сохранить</button></div></form>
-    <div class="sect"><h4>Это устройство</h4><div><button class="linkish danger" data-d="forget">Отключить это устройство от списка</button></div><span class="hint">Список не удалится, просто на этом устройстве нужно будет снова открыть ссылку-приглашение.</span></div>`;
+    <div class="sect"><h4>Это устройство</h4><div><button class="linkish danger" data-d="forget">Выйти на этом устройстве</button></div><span class="hint">Список не удалится, просто здесь нужно будет снова ввести пароль.</span></div>`;
 }
 
 /* ---------- search ---------- */
@@ -734,7 +754,7 @@ $("#drawer").addEventListener("click", async e => {
   else if (d === "delno") { S.confirmDel = false; renderDrawer(); }
   else if (d === "delyes") { const t = S.movies.get(id)?.title; closeDrawer(); remove(id); toast(`«${t}» удалён`); }
   else if (d === "invite") copy(inviteLink(), "Ссылка скопирована. Отправьте её в мессенджере");
-  else if (d === "forget") { LS.del("conn"); location.href = location.pathname; }
+  else if (d === "forget") { LS.del("room"); LS.del("conn"); location.href = location.pathname; }
   else if (d === "refresh") {
     const m = S.movies.get(id); b.disabled = true; b.innerHTML = '<span class="spin"></span>Обновляю';
     try { const f = await fetchFull(m.type || "movie", m.tmdbId); const keep = { ...f.ratings }; for (const k in keep) if (keep[k] == null) keep[k] = m.ratings?.[k] ?? null; await patch(id, { ...f, ratings: keep }); toast("Обновлено"); }
@@ -747,6 +767,12 @@ $("#drawer").addEventListener("submit", async e => {
     const m = S.movies.get(S.openId);
     patch(S.openId, { ratings: { ...(m.ratings || {}), imdb: num(f.get("imdb")), kp: num(f.get("kp")), rt: num(f.get("rt")), mc: num(f.get("mc")) } });
     S.editScores = false; renderDrawer(); toast("Сохранено");
+  } else if (e.target.id === "pwForm") {
+    const pw = String(f.get("pw") || "").trim(); if (pw.length < 6) return toast("Пароль слишком короткий");
+    try { const nr = await roomFromPassword(pw); if (nr === S.conn.r) return toast("Это текущий пароль");
+      if ((await getDoc(doc(S.db, "rooms", nr))).exists()) return toast("Этот пароль не подходит, придумайте другой");
+      toast("Переношу список…"); await migrate(S.db, S.conn.r, nr); LS.set("room", nr); location.reload(); }
+    catch (err) { console.error(err); toast("Не получилось сменить пароль"); }
   } else if (e.target.id === "setForm") {
     const data = { people: { a: String(f.get("a")).trim() || "Иван", b: String(f.get("b")).trim() || "Влада" }, region: (String(f.get("region")).trim().toUpperCase() || "ES").slice(0, 2), keys: { tmdb: String(f.get("tmdb")).trim(), omdb: String(f.get("omdb")).trim(), kp: String(f.get("kp")).trim() } };
     try { await updateDoc(S.roomRef, data); toast("Настройки сохранены"); closeDrawer(); } catch { toast("Не получилось сохранить"); }
@@ -784,12 +810,52 @@ $("#createBtn").addEventListener("click", async () => {
 });
 
 /* ---------- boot ---------- */
+async function roomFromPassword(pw) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("nashe-kino|" + pw.trim()));
+  return Array.from(new Uint8Array(buf), x => x.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+async function migrate(db, from, to) {
+  const oldRef = doc(db, "rooms", from), newRef = doc(db, "rooms", to);
+  const room = await getDoc(oldRef); if (!room.exists()) throw new Error("no source");
+  const { moved, ...data } = room.data();
+  await setDoc(newRef, data);
+  const movies = await getDocs(collection(oldRef, "movies"));
+  for (const m of movies.docs) await setDoc(doc(newRef, "movies", m.id), m.data());
+  for (const m of movies.docs) await deleteDoc(doc(oldRef, "movies", m.id));
+  await setDoc(oldRef, { moved: true });
+}
+let loginDb = null;
+function showLogin() {
+  $("#login").hidden = false;
+  loginDb = loginDb || getFirestore(initializeApp(BUILTIN.c, "login"));
+  $("#pw").focus();
+}
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const pw = $("#pw").value, err = $("#loginErr"), btn = $("#loginBtn"), migrateBox = $("#migrateBox");
+  err.hidden = true; if (!pw.trim()) return;
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Проверяю';
+  try {
+    const r = await roomFromPassword(pw);
+    const s = await getDoc(doc(loginDb, "rooms", r));
+    if (s.exists() && !s.data().moved) { LS.set("room", r); location.reload(); return; }
+    const legacy = await getDoc(doc(loginDb, "rooms", LEGACY_ROOM));
+    if (legacy.exists() && !legacy.data().moved && pw.trim().length >= 6) { migrateBox.hidden = false; }
+    else { err.textContent = "Неверный пароль"; err.hidden = false; }
+  } catch (x) { console.error(x); err.textContent = "Нет связи с базой. Проверьте интернет."; err.hidden = false; }
+  btn.disabled = false; btn.textContent = "Войти";
+});
+$("#migrateBtn").addEventListener("click", async () => {
+  const b = $("#migrateBtn"); b.disabled = true; b.innerHTML = '<span class="spin"></span>Переношу';
+  try { const r = await roomFromPassword($("#pw").value); await migrate(loginDb, LEGACY_ROOM, r); LS.set("room", r); location.reload(); }
+  catch (x) { console.error(x); b.disabled = false; b.textContent = "Защитить список этим паролем"; $("#loginErr").textContent = "Не получилось перенести список."; $("#loginErr").hidden = false; }
+});
 function boot() {
-  let conn = null;
-  const h = location.hash.slice(1);
-  if (h) { try { const p = b64d(h); if (p?.c && p?.r) { conn = p; LS.set("conn", h); } } catch {} }
-  if (!conn) { const s = LS.get("conn"); if (s) { try { conn = b64d(s); history.replaceState(null, "", "#" + s); } catch {} } }
-  if (!conn) { $("#setup").hidden = false; return; }
+  if (location.hash) history.replaceState(null, "", location.pathname);
+  LS.del("conn");
+  const room = LS.get("room");
+  if (!room) { showLogin(); return; }
+  const conn = { c: BUILTIN.c, r: room };
   S.conn = conn;
   $("#app").hidden = false; $("#meSeg").hidden = false; $("#meLbl").hidden = false; $("#setBtn").hidden = false;
   render();
@@ -797,7 +863,7 @@ function boot() {
   try { S.db = initializeFirestore(app, { localCache: persistentLocalCache() }); } catch { S.db = getFirestore(app); }
   S.roomRef = doc(S.db, "rooms", conn.r);
   onSnapshot(S.roomRef, s => {
-    if (!s.exists()) { notice("Список по этой ссылке не найден. Проверьте, что ссылка скопирована целиком."); return; }
+    if (!s.exists() || s.data().moved) { LS.del("room"); location.reload(); return; }
     const d = s.data(); S.people = { a: d.people?.a || "Иван", b: d.people?.b || "Влада" }; S.keys = d.keys || {}; S.region = d.region || "ES";
     notice(S.keys.tmdb ? "" : "Не задан ключ TMDB: поиск не будет работать. Добавьте его в настройках.");
     render();
