@@ -760,7 +760,7 @@ function parseFbConfig(text) {
   while ((m = re.exec(text))) out[m[1]] = m[2];
   return out.apiKey && out.projectId && out.appId ? out : null;
 }
-function randomRoom() { const a = new Uint8Array(18); crypto.getRandomValues(a); return Array.from(a, x => "abcdefghijklmnopqrstuvwxyz0123456789"[x % 36]).join(""); }
+function randomRoom() { const a = new Uint8Array(24); crypto.getRandomValues(a); return Array.from(a, x => "abcdefghijklmnopqrstuvwxyz0123456789"[x % 36]).join(""); }
 $("#copyRules").addEventListener("click", () => copy($("#rulesText").textContent, "Правила скопированы"));
 $("#createBtn").addEventListener("click", async () => {
   const err = $("#setupErr"); err.hidden = true;
