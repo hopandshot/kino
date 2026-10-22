@@ -231,6 +231,22 @@ a{color:inherit}
 .lang.ok{color:var(--good)}
 .sub-h{font-size:12.5px;font-weight:500;color:var(--ink-2);margin-top:6px}
 
+.who-modal{justify-content:center;align-items:center;z-index:30}
+.whobox{background:var(--surface);border-radius:18px;padding:28px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:10px;align-items:center;width:min(340px,calc(100% - 32px));text-align:center}
+.whobox h2{font:400 24px var(--display)}
+.whobtns{display:flex;gap:10px;margin-top:8px}
+.whobtns .btn{padding:10px 22px;font-size:15px}
+.vsum{display:grid;grid-template-columns:80px 1fr auto;gap:10px;align-items:center;font-size:13.5px;color:var(--ink-2)}
+.vday{font-size:12px;font-weight:500;color:var(--ink-3);margin-top:10px}
+.vday::first-letter{text-transform:uppercase}
+.vrow{display:grid;grid-template-columns:48px 70px 1fr auto;gap:10px;align-items:center;font-size:13.5px;padding:7px 0;border-bottom:1px solid var(--line)}
+.vt{font:500 13px var(--mono);font-variant-numeric:tabular-nums}
+.vd{color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vdur{font:400 12px var(--mono);color:var(--ink-3);white-space:nowrap}
+
+.added{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px;color:var(--ink-2)}
+.added .dot{color:var(--ink-3)}
+
 [hidden]{display:none!important}
 .drawer>*{flex-shrink:0}
 .toast{border-radius:14px;text-align:center}
@@ -287,8 +303,16 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /rooms/{room} {
       allow get, create, update: if room.size() >= 20;
-      match /{rest=**} {
+      match /movies/{m} {
         allow read, write: if room.size() >= 20;
+      }
+      match /visits/{v} {
+        allow create: if room.size() >= 20;
+        allow update: if room.size() >= 20
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen', 'durationSec', 'who']);
+        allow read, delete: if request.auth != null
+          && request.auth.token.email == 'ВАШ_EMAIL@gmail.com'
+          && request.auth.token.email_verified == true;
       }
     }
   }
@@ -364,11 +388,13 @@ service cloud.firestore {
   </div>
 </div>
 
+<div class="scrim who-modal" id="whoModal" hidden><div class="whobox"><h2>Кто смотрит?</h2><p class="hint">Выберите один раз на этом устройстве.</p><div id="whoBtns" class="whobtns"></div></div></div>
 <div class="scrim" id="scrim" hidden><aside class="drawer" id="drawer" role="dialog" aria-modal="true"></aside></div>
 <div class="toast" id="toast" hidden></div>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { initializeFirestore, getFirestore, persistentLocalCache, doc, collection, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { query, orderBy, limit, initializeFirestore, getFirestore, persistentLocalCache, doc, collection, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -381,7 +407,7 @@ const num = v => { if (v === null || v === undefined || v === "" || v === "N/A")
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 const BUILTIN = {"c": {"apiKey": "AIzaSyDaltvSFVhSBC72aS_19rDrqE2-At1oKgk", "authDomain": "kinoivl.firebaseapp.com", "projectId": "kinoivl", "storageBucket": "kinoivl.firebasestorage.app", "messagingSenderId": "172151610776", "appId": "1:172151610776:web:cbb29ca7de06feeb879fed"}, "r": null};
-const LEGACY_ROOM = "8fbyzer9qt5pxs6gpnin2yih";
+const LEGACY_ROOM = "";
 const S = {
   db: null, roomRef: null, conn: null,
   movies: new Map(), people: { a: "Иван", b: "Влада" }, keys: {}, region: "ES",
@@ -555,7 +581,7 @@ function render() {
           <h3 data-act="open">${esc(m.title)} ${m.year ? `<span class="yr">${m.year}</span>` : ""}</h3>
           ${sub ? `<div class="sub">${esc(sub)}</div>` : ""}
           <div class="scores">${scoresHTML(m)}</div>
-          <div class="meta">${whoHTML(m.addedBy)}${isNew(m) ? '<span class="new">NEW</span>' : ""}${m.origLang === "ru" || m.ruRelease ? '<span class="new" title="Есть на русском">RU</span>' : m.origLang === "en" ? '<span class="new" title="Оригинал на английском">EN</span>' : ""}${ours}${m.status === "watched" && m.watchedAt ? `<span>${new Date(m.watchedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>` : ""}</div>
+          <div class="meta">${whoHTML(m.addedBy)}${isNew(m) ? '<span class="new">NEW</span>' : ""}${m.origLang === "ru" || m.ruRelease ? '<span class="new" title="Есть на русском">RU</span>' : m.origLang === "en" ? '<span class="new" title="Оригинал на английском">EN</span>' : ""}${ours}${m.status === "watched" && m.watchedAt ? `<span title="Посмотрели">✓ ${shortDate(m.watchedAt)}</span>` : m.addedAt ? `<span title="Добавлен ${esc(fullDate(m.addedAt))}">${shortDate(m.addedAt)}</span>` : ""}</div>
         </div>
         <div class="acts">${acts}<button class="iconbtn" data-act="open" title="Подробнее">${ICON.play}</button></div>
       </article>`;
@@ -607,9 +633,27 @@ function linkGroups(m) {
 }
 const REGION_NAMES = { ES: "Испании", PL: "Польше", DE: "Германии", US: "США", GB: "Великобритании", FR: "Франции", IT: "Италии", PT: "Португалии", RU: "России" };
 const linkBlock = ([title, arr]) => `<div class="sub-h">${title}</div><div class="links">${arr.map(([n, d, u]) => `<a href="${u}" target="_blank" rel="noopener"><b>${n}</b><span>${d}</span></a>`).join("")}</div>`;
+function shortDate(t) {
+  const d = new Date(t), now = new Date(), days = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / DAY);
+  if (days === 0) return "сегодня"; if (days === 1) return "вчера"; if (days < 7) return days + (days < 5 ? " дня" : " дней") + " назад";
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+}
+function fullDate(t) {
+  const d = new Date(t), now = new Date(), days = Math.floor((new Date(now.toDateString()) - new Date(d.toDateString())) / DAY);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const day = days === 0 ? "сегодня" : days === 1 ? "вчера" : d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+  return `${day} в ${time}`;
+}
+function addedLine(m) {
+  const verb = m.addedBy === "b" ? "добавила" : m.addedBy === "a" ? "добавил" : "добавлено";
+  const parts = [`${whoHTML(m.addedBy)} <span>${verb} ${m.addedAt ? esc(fullDate(m.addedAt)) : ""}</span>`];
+  if (m.status === "watched" && m.watchedAt) parts.push(`<span>посмотрели ${esc(fullDate(m.watchedAt))}</span>`);
+  return parts.join('<span class="dot">·</span>');
+}
 function openDrawer(id) { S.openId = id; S.settingsOpen = false; S.confirmDel = false; S.editScores = false; $("#scrim").hidden = false; renderDrawer(); $("#drawer").scrollTop = 0; }
-function closeDrawer() { S.openId = null; S.settingsOpen = false; $("#scrim").hidden = true; }
+function closeDrawer() { S.openId = null; S.settingsOpen = false; S.adminOpen = false; $("#scrim").hidden = true; }
 function renderDrawer() {
+  if (S.adminOpen) return renderAdmin();
   if (S.settingsOpen) return renderSettings();
   const m = S.movies.get(S.openId); if (!m) return closeDrawer();
   const facts = [
@@ -622,7 +666,7 @@ function renderDrawer() {
   const pgroup = (lbl, arr, cls = "") => arr.length ? `<div class="pgroup"><span class="lbl ${cls}">${lbl}</span>${arr.map(x => `<img class="plogo" src="${IMG(x.logo, "w92")}" alt="${esc(x.name)}" title="${esc(x.name)}" loading="lazy">`).join("")}</div>` : "";
   const rateRow = p => `<div class="rate"><span class="nm ${p}">${esc(S.people[p])}</span><div class="dots ${p}">${Array.from({ length: 10 }, (_, i) => `<button data-rate="${p}" data-v="${i + 1}" class="${m.ours?.[p] === i + 1 ? "on" : ""}">${i + 1}</button>`).join("")}</div></div>`;
   $("#drawer").innerHTML = `
-    <div class="dhead">${whoHTML(m.addedBy)}<button class="iconbtn" data-d="close" aria-label="Закрыть">${ICON.x}</button></div>
+    <div class="dhead"><div class="added">${addedLine(m)}</div><button class="iconbtn" data-d="close" aria-label="Закрыть">${ICON.x}</button></div>
     ${m.backdrop ? `<div class="backdrop"><img src="${IMG(m.backdrop, "w780")}" alt=""></div>` : ""}
     <div class="dhero">
       <div class="bigcover">${coverHTML(m, "w342")}</div>
@@ -678,6 +722,7 @@ function renderSettings() {
       <label class="field">OMDb<input name="omdb" value="${esc(k.omdb || "")}" autocomplete="off"></label>
       <label class="field">Кинопоиск (kinopoisk.dev, необязательно)<input name="kp" value="${esc(k.kp || "")}" autocomplete="off"></label>
       <div><button class="btn small" type="submit">Сохранить</button></div></form>
+    ${LS.get("admin") === "1" ? `<div class="sect"><h4>Админ</h4><div><button class="btn small ghost" data-d="admin">Журнал посещений</button></div></div>` : ""}
     <div class="sect"><h4>Это устройство</h4><div><button class="linkish danger" data-d="forget">Выйти на этом устройстве</button></div><span class="hint">Список не удалится, просто здесь нужно будет снова ввести пароль.</span></div>`;
 }
 
@@ -721,7 +766,7 @@ $("#results").addEventListener("click", async e => {
 });
 
 /* ---------- events ---------- */
-$("#meSeg").addEventListener("click", e => { const b = e.target.closest("button[data-p]"); if (!b) return; S.me = b.dataset.p; LS.set("me", S.me); render(); });
+$("#meSeg").addEventListener("click", e => { const b = e.target.closest("button[data-p]"); if (!b) return; S.me = b.dataset.p; LS.set("me", S.me); render(); if (visitRef) updateDoc(visitRef, { who: S.me }).catch(() => {}); });
 $("#tabs").addEventListener("click", e => { const b = e.target.closest("button[data-tab]"); if (!b) return; S.tab = b.dataset.tab; LS.set("tab", S.tab); render(); });
 $("#whoF").addEventListener("change", e => { S.who = e.target.value; render(); });
 $("#sortW").addEventListener("change", e => { S.sortW = e.target.value; render(); });
@@ -754,6 +799,16 @@ $("#drawer").addEventListener("click", async e => {
   else if (d === "delno") { S.confirmDel = false; renderDrawer(); }
   else if (d === "delyes") { const t = S.movies.get(id)?.title; closeDrawer(); remove(id); toast(`«${t}» удалён`); }
   else if (d === "invite") copy(inviteLink(), "Ссылка скопирована. Отправьте её в мессенджере");
+  else if (d === "admin") openAdmin();
+  else if (d === "gsignin") {
+    signInWithPopup(auth, new GoogleAuthProvider()).catch(err => {
+      const c = err?.code || "";
+      S.adminMsg = c.includes("unauthorized-domain") ? "Добавьте hopandshot.github.io в Firebase: Authentication → Settings → Authorized domains." : c.includes("operation-not-allowed") ? "Включите вход через Google в Firebase: Authentication → Sign-in method → Google." : c.includes("popup-closed") ? "" : "Не получилось войти: " + c;
+      renderAdmin();
+    });
+  }
+  else if (d === "gsignout") { signOut(auth); LS.del("admin"); }
+  else if (d === "areload") loadVisits();
   else if (d === "forget") { LS.del("room"); LS.del("conn"); location.href = location.pathname; }
   else if (d === "refresh") {
     const m = S.movies.get(id); b.disabled = true; b.innerHTML = '<span class="spin"></span>Обновляю';
@@ -839,8 +894,8 @@ $("#loginForm").addEventListener("submit", async e => {
     const r = await roomFromPassword(pw);
     const s = await getDoc(doc(loginDb, "rooms", r));
     if (s.exists() && !s.data().moved) { LS.set("room", r); location.reload(); return; }
-    const legacy = await getDoc(doc(loginDb, "rooms", LEGACY_ROOM));
-    if (legacy.exists() && !legacy.data().moved && pw.trim().length >= 6) { migrateBox.hidden = false; }
+    const legacy = LEGACY_ROOM ? await getDoc(doc(loginDb, "rooms", LEGACY_ROOM)) : null;
+    if (legacy && legacy.exists() && !legacy.data().moved && pw.trim().length >= 6) { migrateBox.hidden = false; }
     else { err.textContent = "Неверный пароль"; err.hidden = false; }
   } catch (x) { console.error(x); err.textContent = "Нет связи с базой. Проверьте интернет."; err.hidden = false; }
   btn.disabled = false; btn.textContent = "Войти";
@@ -850,7 +905,92 @@ $("#migrateBtn").addEventListener("click", async () => {
   try { const r = await roomFromPassword($("#pw").value); await migrate(loginDb, LEGACY_ROOM, r); LS.set("room", r); location.reload(); }
   catch (x) { console.error(x); b.disabled = false; b.textContent = "Защитить список этим паролем"; $("#loginErr").textContent = "Не получилось перенести список."; $("#loginErr").hidden = false; }
 });
+/* ---------- visits log ---------- */
+const DEVICE_ID = (() => { let id = LS.get("dev"); if (!id) { id = uid() + uid(); LS.set("dev", id); } return id; })();
+function deviceInfo() {
+  const ua = navigator.userAgent;
+  const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "?";
+  const br = /YaBrowser/.test(ua) ? "Яндекс" : /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /SamsungBrowser/.test(ua) ? "Samsung" : /Firefox|FxiOS/.test(ua) ? "Firefox" : /Chrome|CriOS/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "?";
+  let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
+  return { os, br, ua: ua.slice(0, 300), screen: `${screen.width}×${screen.height}`, tz, lang: navigator.language || "" };
+}
+let visitRef = null, visitStart = 0, hbT = null, hiddenAt = 0;
+async function startVisit() {
+  if (!S.roomRef || !LS.get("me")) return;
+  visitStart = Date.now();
+  visitRef = doc(collection(S.roomRef, "visits"), visitStart.toString(36) + "-" + DEVICE_ID.slice(-6));
+  try { await setDoc(visitRef, { at: visitStart, who: S.me, device: DEVICE_ID, admin: LS.get("admin") === "1", ...deviceInfo(), lastSeen: visitStart, durationSec: 0 }); }
+  catch (e) { console.warn("visit log", e); visitRef = null; }
+  clearInterval(hbT); hbT = setInterval(() => beat(), 60000);
+}
+function beat(force) {
+  if (!visitRef || (document.hidden && !force)) return;
+  const now = Date.now();
+  updateDoc(visitRef, { lastSeen: now, durationSec: Math.round((now - visitStart) / 1000) }).catch(() => {});
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); beat(true); }
+  else if (hiddenAt && Date.now() - hiddenAt > 30 * 60e3) { hiddenAt = 0; startVisit(); }
+});
+function askWho() {
+  const m = $("#whoModal");
+  $("#whoBtns").innerHTML = ["a", "b"].map(p => `<button class="btn ghost" data-who="${p}">${esc(S.people[p])}</button>`).join("");
+  m.hidden = false;
+}
+$("#whoBtns").addEventListener("click", e => {
+  const b = e.target.closest("[data-who]"); if (!b) return;
+  S.me = b.dataset.who; LS.set("me", S.me); $("#whoModal").hidden = true; render(); startVisit();
+});
+
+/* ---------- admin ---------- */
+let auth = null, adminUser = undefined, visits = null;
+function openAdmin() {
+  S.openId = null; S.settingsOpen = false; S.adminOpen = true; S.adminMsg = ""; $("#scrim").hidden = false;
+  if (!auth) { auth = getAuth(S.app); onAuthStateChanged(auth, u => { adminUser = u; visits = null; if (u) loadVisits(); else if (S.adminOpen) renderAdmin(); }); }
+  else if (adminUser) loadVisits();
+  renderAdmin();
+}
+async function loadVisits() {
+  visits = "loading"; renderAdmin();
+  try {
+    const snap = await getDocs(query(collection(S.roomRef, "visits"), orderBy("at", "desc"), limit(500)));
+    visits = snap.docs.map(d => ({ id: d.id, ...d.data() })); LS.set("admin", "1"); S.adminMsg = "";
+  } catch (e) {
+    console.error(e); visits = null;
+    S.adminMsg = String(e?.code || e).includes("permission") ? `Аккаунт ${adminUser?.email || ""} не админ. Войдите другим Google-аккаунтом или проверьте email в правилах Firestore.` : "Не получилось загрузить журнал.";
+  }
+  renderAdmin();
+}
+const plural = (n, a, b, c) => { const m10 = n % 10, m100 = n % 100; return n + " " + (m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? b : c); };
+const fmtDur = s => !s ? "меньше минуты" : s < 3600 ? Math.max(1, Math.round(s / 60)) + " мин" : Math.floor(s / 3600) + " ч " + Math.round((s % 3600) / 60) + " мин";
+const fmtTime = t => new Date(t).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+const fmtDay = t => { const d = new Date(t), today = new Date(); const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Сегодня"; if (d.toDateString() === y.toDateString()) return "Вчера";
+  return d.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" }); };
+function renderAdmin() {
+  if (!S.adminOpen) return;
+  let body;
+  if (adminUser === undefined) body = `<p class="hint"><span class="spin"></span>Проверяю вход…</p>`;
+  else if (!adminUser) body = `<p class="desc" style="font-size:14px">Журнал видит только админ. Войдите своим Google-аккаунтом.</p><div><button class="btn" data-d="gsignin">Войти через Google</button></div>`;
+  else if (visits === "loading") body = `<p class="hint"><span class="spin"></span>Загружаю журнал…</p>`;
+  else if (Array.isArray(visits)) {
+    const last = p => visits.find(v => v.who === p);
+    const summary = ["a", "b"].map(p => { const v = last(p); return `<div class="vsum"><span class="who ${p}">${esc(S.people[p])}</span><span>${v ? `последний вход ${fmtDay(v.at).toLowerCase()}, ${fmtTime(v.at)}` : "ещё не заходил(а)"}</span><span class="hint">${plural(visits.filter(x => x.who === p).length, "вход", "входа", "входов")}</span></div>`; }).join("");
+    let day = "", rows = "";
+    for (const v of visits) {
+      const d = fmtDay(v.at); if (d !== day) { day = d; rows += `<div class="vday">${esc(d)}</div>`; }
+      rows += `<div class="vrow"><span class="vt">${fmtTime(v.at)}</span>${whoHTML(v.who)}<span class="vd">${esc(v.os)} · ${esc(v.br)}${v.admin ? " · админ" : ""}</span><span class="vdur">${fmtDur(v.durationSec)}</span></div>`;
+    }
+    body = `<div class="sect">${summary}</div><div class="sect"><h4>Все входы</h4>${rows || '<p class="hint">Пока пусто.</p>'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small ghost" data-d="areload">Обновить</button><button class="btn small ghost" data-d="gsignout">Выйти из Google</button></div>
+      <span class="hint">Вы вошли как ${esc(adminUser.email)}. Время показано по часовому поясу этого устройства.</span>`;
+  } else body = `<div><button class="btn small ghost" data-d="gsignout">Выйти из Google</button></div>`;
+  $("#drawer").innerHTML = `<div class="dhead"><h2 style="font:400 22px var(--display)">Журнал посещений</h2><button class="iconbtn" data-d="close" aria-label="Закрыть">${ICON.x}</button></div>
+    ${S.adminMsg ? `<p class="err">${esc(S.adminMsg)}</p>` : ""}${body}`;
+}
+
 function boot() {
+  const wantAdmin = location.hash === "#admin";
   if (location.hash) history.replaceState(null, "", location.pathname);
   LS.del("conn");
   const room = LS.get("room");
@@ -859,7 +999,7 @@ function boot() {
   S.conn = conn;
   $("#app").hidden = false; $("#meSeg").hidden = false; $("#meLbl").hidden = false; $("#setBtn").hidden = false;
   render();
-  const app = initializeApp(conn.c);
+  const app = initializeApp(conn.c); S.app = app;
   try { S.db = initializeFirestore(app, { localCache: persistentLocalCache() }); } catch { S.db = getFirestore(app); }
   S.roomRef = doc(S.db, "rooms", conn.r);
   onSnapshot(S.roomRef, s => {
@@ -871,6 +1011,8 @@ function boot() {
   onSnapshot(collection(S.roomRef, "movies"), snap => {
     const next = new Map(); snap.forEach(d => next.set(d.id, { id: d.id, ...d.data() })); S.movies = next; render();
   }, e => { console.error(e); notice("Нет доступа к списку фильмов. Проверьте правила Firestore."); });
+  if (LS.get("me")) startVisit(); else askWho();
+  if (wantAdmin) openAdmin();
 }
 boot();
 </script>
